@@ -3,6 +3,7 @@
 /* ================= Constants ================= */
 const SVG_NS = "http://www.w3.org/2000/svg";
 const STORAGE_KEY = "roomChangeState_v1";
+const ANALYZE_ENDPOINT_KEY = "roomChangeAnalyzeEndpoint_v1";
 let SCALE = 3;
 const MARGIN = 46;
 
@@ -575,6 +576,143 @@ function openModal(html, onMount) {
 function closeModal() {
   document.getElementById("modal-backdrop").hidden = true;
   document.getElementById("modal-content").innerHTML = "";
+  document.getElementById("modal-content").classList.remove("modal-wide");
+}
+
+/* ================= AI Design Review ================= */
+function describeRoomForAI(issues) {
+  const lines = [];
+  lines.push(`Room: ${state.room.width} x ${state.room.length} inches.`);
+  if (state.room.doors.length) {
+    lines.push(
+      "Doors: " +
+        state.room.doors
+          .map(d => `"${d.label}" on the ${d.wall} wall, ${d.pos}in from that wall's start, ${d.width}in wide`)
+          .join("; ") +
+        "."
+    );
+  }
+  lines.push("");
+  lines.push("Furniture:");
+  if (!state.items.length) {
+    lines.push("(none placed yet)");
+  }
+  for (const item of state.items) {
+    const zone = state.zones.find(z => z.id === item.zoneId);
+    lines.push(
+      `- ${item.name}: ${item.w}x${item.d}in, centered at (${round1(item.cx)}, ${round1(item.cy)})in ` +
+        `from the top-left corner, rotated ${Math.round(item.rotation || 0)} degrees, job: ${jobTag(item.jobTag).label}` +
+        `${zone ? `, in zone "${zone.name}"` : ""}.`
+    );
+  }
+  if (state.zones.length) {
+    lines.push("");
+    lines.push("Zones:");
+    for (const zone of state.zones) {
+      const preset = ZONE_TYPES[zone.type] || ZONE_TYPES.custom;
+      const required = zone.type === "custom" ? (zone.requiredTags || []) : preset.requiredTags;
+      const assigned = state.items.filter(i => i.zoneId === zone.id);
+      const missing = required.filter(tag => !assigned.some(i => i.jobTag === tag));
+      lines.push(
+        `- ${zone.name} (${preset.label}): ${assigned.length} piece(s) assigned.` +
+          (missing.length ? ` Still missing: ${missing.map(t => jobTag(t).label).join(", ")}.` : "")
+      );
+    }
+  }
+  if (state.lanes.length) {
+    lines.push("");
+    lines.push(`${state.lanes.length} "keep clear" path(s) marked.`);
+  }
+  lines.push("");
+  if (issues.length) {
+    lines.push("Issues already detected mechanically (trust these, don't re-derive):");
+    for (const issue of issues) lines.push(`- ${issue.message}`);
+  } else {
+    lines.push("No mechanical issues detected (no overlaps, blocked paths, or unassigned jobs).");
+  }
+  return lines.join("\n");
+}
+
+function formatFeedbackHtml(text) {
+  const paragraphs = text.trim().split(/\n\s*\n/);
+  return paragraphs
+    .map(para => {
+      const lines = para.split("\n").map(l => l.trim()).filter(Boolean);
+      const isList = lines.length > 1 && lines.every(l => /^[-•]\s+/.test(l));
+      if (isList) {
+        return "<ul>" + lines.map(l => `<li>${escapeHtml(l.replace(/^[-•]\s+/, ""))}</li>`).join("") + "</ul>";
+      }
+      return `<p>${escapeHtml(para.trim()).replace(/\n/g, "<br>")}</p>`;
+    })
+    .join("");
+}
+
+function openAnalyzeSettingsModal(onSaved) {
+  const current = localStorage.getItem(ANALYZE_ENDPOINT_KEY) || "";
+  openModal(`
+    <h2>Connect AI Review</h2>
+    <p class="muted" style="margin:0 0 10px">Paste the web address of your Cloudflare Worker (the small backend that keeps your API key private). You only need to do this once.</p>
+    <form class="stacked-form" id="analyze-settings-form">
+      <label>Worker URL<input type="url" id="as-url" required placeholder="https://your-worker.your-name.workers.dev" value="${escapeHtml(current)}"></label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="as-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </div>
+    </form>
+  `, content => {
+    content.querySelector("#as-cancel").addEventListener("click", closeModal);
+    content.querySelector("#analyze-settings-form").addEventListener("submit", e => {
+      e.preventDefault();
+      const url = content.querySelector("#as-url").value.trim();
+      localStorage.setItem(ANALYZE_ENDPOINT_KEY, url);
+      closeModal();
+      if (onSaved) onSaved();
+    });
+  });
+}
+
+async function runAnalysis() {
+  const endpoint = localStorage.getItem(ANALYZE_ENDPOINT_KEY);
+  if (!endpoint) {
+    openAnalyzeSettingsModal(runAnalysis);
+    return;
+  }
+
+  const roomDescription = describeRoomForAI(computeIssues());
+
+  openModal(`
+    <h2>AI Design Review</h2>
+    <div id="analyze-result"><p class="muted">Thinking it over...</p></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-ghost" id="analyze-settings-btn">Change Worker URL</button>
+      <button type="button" class="btn btn-primary" id="analyze-close">Close</button>
+    </div>
+  `, content => {
+    document.getElementById("modal-content").classList.add("modal-wide");
+    content.querySelector("#analyze-close").addEventListener("click", closeModal);
+    content.querySelector("#analyze-settings-btn").addEventListener("click", () => openAnalyzeSettingsModal(runAnalysis));
+  });
+
+  try {
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomDescription }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    const resultEl = document.getElementById("analyze-result");
+    if (!resultEl) return; // modal was closed before the response came back
+    if (!resp.ok) {
+      resultEl.innerHTML = `<p class="muted">${escapeHtml(data.error || "Something went wrong talking to the AI service.")}</p>`;
+      return;
+    }
+    resultEl.innerHTML = formatFeedbackHtml(data.feedback || "No feedback returned.");
+  } catch (err) {
+    const resultEl = document.getElementById("analyze-result");
+    if (resultEl) {
+      resultEl.innerHTML = '<p class="muted">Could not reach the AI service. Check your Worker URL and your internet connection.</p>';
+    }
+  }
 }
 
 /* ================= Wiring ================= */
@@ -754,6 +892,8 @@ function wireEvents() {
       });
     });
   });
+
+  document.getElementById("btn-analyze").addEventListener("click", runAnalysis);
 
   document.getElementById("btn-export").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
