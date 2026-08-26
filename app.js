@@ -533,22 +533,32 @@ function renderSelectedPanel() {
 }
 
 /* ================= Master render ================= */
+function safeRender(name, fn) {
+  try {
+    fn();
+  } catch (err) {
+    console.error(`Room Change: "${name}" failed to render.`, err);
+    showStartupError();
+  }
+}
+
 function render() {
   const issues = computeIssues();
   const errorIds = new Set();
   issues.filter(i => i.severity === "error").forEach(i => i.relatedIds.forEach(id => errorIds.add(id)));
 
-  renderCanvas(errorIds);
-  renderDoorList();
-  renderFurnitureList();
-  renderZoneList();
-  renderIssueList(issues);
-
-  const selectedBody = document.getElementById("selected-body");
-  const active = document.activeElement;
-  if (!(selectedBody.contains(active) && active !== document.body)) {
-    renderSelectedPanel();
-  }
+  safeRender("canvas", () => renderCanvas(errorIds));
+  safeRender("door list", renderDoorList);
+  safeRender("furniture list", renderFurnitureList);
+  safeRender("zone list", renderZoneList);
+  safeRender("issue list", () => renderIssueList(issues));
+  safeRender("selected piece panel", () => {
+    const selectedBody = document.getElementById("selected-body");
+    const active = document.activeElement;
+    if (!(selectedBody.contains(active) && active !== document.body)) {
+      renderSelectedPanel();
+    }
+  });
 }
 
 /* ================= Modal ================= */
@@ -589,12 +599,66 @@ function renderDoorList() {
       `<span class="item-name">${escapeHtml(door.label || "Door")}</span>` +
       `<span class="item-dims">${WALL_LABELS[door.wall] || door.wall} wall, ${door.width}"</span>` +
       `<button class="item-del" type="button" title="Remove">✕</button>`;
-    li.querySelector(".item-del").addEventListener("click", () => {
+    li.addEventListener("click", e => {
+      if (e.target.closest(".item-del")) return;
+      openDoorModal(door);
+    });
+    li.querySelector(".item-del").addEventListener("click", e => {
+      e.stopPropagation();
       state.room.doors = state.room.doors.filter(d => d.id !== door.id);
       save(); render();
     });
     ul.appendChild(li);
   }
+}
+
+function openDoorModal(existingDoor) {
+  const isEdit = !!existingDoor;
+  openModal(`
+    <h2>${isEdit ? "Edit Door" : "Add a Door"}</h2>
+    <form class="stacked-form" id="add-door-form">
+      <label>Label<input type="text" id="ad-label" required placeholder="e.g. Closet Door" value="${escapeHtml(isEdit ? existingDoor.label : "Closet Door")}"></label>
+      <label>Which wall is it on?
+        <select id="ad-wall">
+          <option value="top">Top</option>
+          <option value="right">Right</option>
+          <option value="bottom">Bottom</option>
+          <option value="left">Left</option>
+        </select>
+      </label>
+      <label>Position along that wall (inches from the wall's start)
+        <input type="number" id="ad-pos" min="0" step="1" value="${isEdit ? existingDoor.pos : 0}">
+      </label>
+      <label>Width (inches)<input type="number" id="ad-width" min="10" max="120" step="1" value="${isEdit ? existingDoor.width : 30}"></label>
+      <div class="modal-actions">
+        ${isEdit ? '<button type="button" class="btn btn-ghost" id="ad-delete" style="margin-right:auto">Remove Door</button>' : ""}
+        <button type="button" class="btn btn-ghost" id="ad-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">${isEdit ? "Save Changes" : "Add Door"}</button>
+      </div>
+    </form>
+  `, content => {
+    content.querySelector("#ad-wall").value = isEdit ? existingDoor.wall : "left";
+    content.querySelector("#ad-cancel").addEventListener("click", closeModal);
+    if (isEdit) {
+      content.querySelector("#ad-delete").addEventListener("click", () => {
+        state.room.doors = state.room.doors.filter(d => d.id !== existingDoor.id);
+        save(); closeModal(); render();
+      });
+    }
+    content.querySelector("#add-door-form").addEventListener("submit", e => {
+      e.preventDefault();
+      const label = content.querySelector("#ad-label").value.trim() || "Door";
+      const wall = content.querySelector("#ad-wall").value;
+      const pos = parseFloat(content.querySelector("#ad-pos").value) || 0;
+      const width = parseFloat(content.querySelector("#ad-width").value) || 30;
+      if (isEdit) {
+        Object.assign(existingDoor, { label, wall, pos, width });
+      } else {
+        state.room.doors.push({ id: uid("dr"), label, wall, pos, width });
+      }
+      save(); closeModal(); render();
+    });
+  });
 }
 
 function wireEvents() {
@@ -605,41 +669,7 @@ function wireEvents() {
     save(); render();
   });
 
-  document.getElementById("btn-add-door").addEventListener("click", () => {
-    openModal(`
-      <h2>Add a Door</h2>
-      <form class="stacked-form" id="add-door-form">
-        <label>Label<input type="text" id="ad-label" required placeholder="e.g. Closet Door" value="Closet Door"></label>
-        <label>Which wall is it on?
-          <select id="ad-wall">
-            <option value="top">Top</option>
-            <option value="right">Right</option>
-            <option value="bottom">Bottom</option>
-            <option value="left">Left</option>
-          </select>
-        </label>
-        <label>Position along that wall (inches from the wall's start)
-          <input type="number" id="ad-pos" min="0" step="1" value="0">
-        </label>
-        <label>Width (inches)<input type="number" id="ad-width" min="10" max="120" step="1" value="30"></label>
-        <div class="modal-actions">
-          <button type="button" class="btn btn-ghost" id="ad-cancel">Cancel</button>
-          <button type="submit" class="btn btn-primary">Add Door</button>
-        </div>
-      </form>
-    `, content => {
-      content.querySelector("#ad-cancel").addEventListener("click", closeModal);
-      content.querySelector("#add-door-form").addEventListener("submit", e => {
-        e.preventDefault();
-        const label = content.querySelector("#ad-label").value.trim() || "Door";
-        const wall = content.querySelector("#ad-wall").value;
-        const pos = parseFloat(content.querySelector("#ad-pos").value) || 0;
-        const width = parseFloat(content.querySelector("#ad-width").value) || 30;
-        state.room.doors.push({ id: uid("dr"), label, wall, pos, width });
-        save(); closeModal(); render();
-      });
-    });
-  });
+  document.getElementById("btn-add-door").addEventListener("click", () => openDoorModal(null));
 
   document.getElementById("btn-add-furniture").addEventListener("click", () => {
     openModal(`
@@ -759,9 +789,32 @@ function wireEvents() {
 }
 
 /* ================= Init ================= */
+function showStartupError() {
+  if (document.getElementById("startup-error-banner")) return;
+  const banner = document.createElement("div");
+  banner.id = "startup-error-banner";
+  banner.style.cssText =
+    "position:fixed;top:0;left:0;right:0;z-index:100;background:#C7311F;color:#fff;" +
+    "font-family:sans-serif;padding:10px 16px;text-align:center;";
+  banner.textContent =
+    "Something didn't load right. Your saved room is almost certainly fine — try a hard refresh " +
+    "(Ctrl+Shift+R on Windows/Linux, Cmd+Shift+R on Mac) to fix it.";
+  document.body.prepend(banner);
+}
+
 function init() {
   populateRoomForm();
-  wireEvents();
-  render();
+  try {
+    render();
+  } catch (err) {
+    console.error("Room Change failed to render.", err);
+    showStartupError();
+  }
+  try {
+    wireEvents();
+  } catch (err) {
+    console.error("Room Change failed to wire up controls.", err);
+    showStartupError();
+  }
 }
 init();
