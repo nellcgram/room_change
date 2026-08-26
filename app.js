@@ -25,7 +25,10 @@ const ZONE_TYPES = {
 /* ================= State ================= */
 function defaultState() {
   return {
-    room: { width: 132, length: 144, doorWall: "left", doorPos: 0, doorWidth: 32 },
+    room: {
+      width: 132, length: 144,
+      doors: [{ id: uid("dr"), label: "Door", wall: "left", pos: 0, width: 32 }]
+    },
     items: [],
     zones: [],
     lanes: []
@@ -35,8 +38,20 @@ function defaultState() {
 function normalizeState(parsed) {
   const base = defaultState();
   parsed = parsed || {};
+  const parsedRoom = parsed.room || {};
+  let doors = Array.isArray(parsedRoom.doors) ? parsedRoom.doors : null;
+  if (!doors) {
+    // Migrate the old single-door room shape (doorWall/doorPos/doorWidth) into the doors array.
+    doors = parsedRoom.doorWall
+      ? [{ id: uid("dr"), label: "Door", wall: parsedRoom.doorWall, pos: parsedRoom.doorPos || 0, width: parsedRoom.doorWidth || 32 }]
+      : base.room.doors;
+  }
   return {
-    room: Object.assign({}, base.room, parsed.room || {}),
+    room: {
+      width: parsedRoom.width || base.room.width,
+      length: parsedRoom.length || base.room.length,
+      doors
+    },
     items: Array.isArray(parsed.items) ? parsed.items : [],
     zones: Array.isArray(parsed.zones) ? parsed.zones : [],
     lanes: Array.isArray(parsed.lanes) ? parsed.lanes : []
@@ -276,20 +291,21 @@ function renderCanvas(errorIds) {
 
   root.appendChild(svgEl("rect", { x: 0, y: 0, width: pxRoomW, height: pxRoomL, class: "room-wall" }));
 
-  const { doorWall, doorPos, doorWidth } = state.room;
-  const dp = doorPos * SCALE, dw = doorWidth * SCALE;
-  let dx1, dy1, dx2, dy2, labelDx = 0, labelDy = -6;
-  if (doorWall === "top") { dx1 = dp; dy1 = 0; dx2 = dp + dw; dy2 = 0; labelDy = 14; }
-  else if (doorWall === "bottom") { dx1 = dp; dy1 = pxRoomL; dx2 = dp + dw; dy2 = pxRoomL; labelDy = -6; }
-  else if (doorWall === "left") { dx1 = 0; dy1 = dp; dx2 = 0; dy2 = dp + dw; labelDx = 4; }
-  else { dx1 = pxRoomW; dy1 = dp; dx2 = pxRoomW; dy2 = dp + dw; labelDx = -34; }
-  root.appendChild(svgEl("line", { x1: dx1, y1: dy1, x2: dx2, y2: dy2, class: "room-door" }));
-  const doorLabel = svgEl("text", {
-    x: (dx1 + dx2) / 2 + labelDx, y: (dy1 + dy2) / 2 + labelDy,
-    "text-anchor": "middle", class: "room-door-label"
-  });
-  doorLabel.textContent = "door";
-  root.appendChild(doorLabel);
+  for (const door of state.room.doors) {
+    const dp = door.pos * SCALE, dw = door.width * SCALE;
+    let dx1, dy1, dx2, dy2, labelDx = 0, labelDy = -6;
+    if (door.wall === "top") { dx1 = dp; dy1 = 0; dx2 = dp + dw; dy2 = 0; labelDy = 14; }
+    else if (door.wall === "bottom") { dx1 = dp; dy1 = pxRoomL; dx2 = dp + dw; dy2 = pxRoomL; labelDy = -6; }
+    else if (door.wall === "left") { dx1 = 0; dy1 = dp; dx2 = 0; dy2 = dp + dw; labelDx = 4; }
+    else { dx1 = pxRoomW; dy1 = dp; dx2 = pxRoomW; dy2 = dp + dw; labelDx = -34; }
+    root.appendChild(svgEl("line", { x1: dx1, y1: dy1, x2: dx2, y2: dy2, class: "room-door" }));
+    const doorLabel = svgEl("text", {
+      x: (dx1 + dx2) / 2 + labelDx, y: (dy1 + dy2) / 2 + labelDy,
+      "text-anchor": "middle", class: "room-door-label"
+    });
+    doorLabel.textContent = door.label || "door";
+    root.appendChild(doorLabel);
+  }
 
   for (const lane of state.lanes) root.appendChild(renderLaneEl(lane, errorIds));
   for (const item of state.items) root.appendChild(renderPieceEl(item, errorIds));
@@ -523,6 +539,7 @@ function render() {
   issues.filter(i => i.severity === "error").forEach(i => i.relatedIds.forEach(id => errorIds.add(id)));
 
   renderCanvas(errorIds);
+  renderDoorList();
   renderFurnitureList();
   renderZoneList();
   renderIssueList(issues);
@@ -554,22 +571,74 @@ function closeModal() {
 function populateRoomForm() {
   document.getElementById("room-width").value = state.room.width;
   document.getElementById("room-length").value = state.room.length;
-  document.getElementById("room-door-wall").value = state.room.doorWall;
-  document.getElementById("room-door-pos").value = state.room.doorPos;
-  document.getElementById("room-door-width").value = state.room.doorWidth;
+}
+
+const WALL_LABELS = { top: "Top", right: "Right", bottom: "Bottom", left: "Left" };
+
+function renderDoorList() {
+  const ul = document.getElementById("door-list");
+  ul.innerHTML = "";
+  if (!state.room.doors.length) {
+    ul.innerHTML = '<li class="issue-empty">No doors yet.</li>';
+    return;
+  }
+  for (const door of state.room.doors) {
+    const li = document.createElement("li");
+    li.className = "item-row";
+    li.innerHTML =
+      `<span class="item-name">${escapeHtml(door.label || "Door")}</span>` +
+      `<span class="item-dims">${WALL_LABELS[door.wall] || door.wall} wall, ${door.width}"</span>` +
+      `<button class="item-del" type="button" title="Remove">✕</button>`;
+    li.querySelector(".item-del").addEventListener("click", () => {
+      state.room.doors = state.room.doors.filter(d => d.id !== door.id);
+      save(); render();
+    });
+    ul.appendChild(li);
+  }
 }
 
 function wireEvents() {
   document.getElementById("form-room").addEventListener("submit", e => {
     e.preventDefault();
-    state.room = {
-      width: parseFloat(document.getElementById("room-width").value) || state.room.width,
-      length: parseFloat(document.getElementById("room-length").value) || state.room.length,
-      doorWall: document.getElementById("room-door-wall").value,
-      doorPos: parseFloat(document.getElementById("room-door-pos").value) || 0,
-      doorWidth: parseFloat(document.getElementById("room-door-width").value) || 32
-    };
+    state.room.width = parseFloat(document.getElementById("room-width").value) || state.room.width;
+    state.room.length = parseFloat(document.getElementById("room-length").value) || state.room.length;
     save(); render();
+  });
+
+  document.getElementById("btn-add-door").addEventListener("click", () => {
+    openModal(`
+      <h2>Add a Door</h2>
+      <form class="stacked-form" id="add-door-form">
+        <label>Label<input type="text" id="ad-label" required placeholder="e.g. Closet Door" value="Closet Door"></label>
+        <label>Which wall is it on?
+          <select id="ad-wall">
+            <option value="top">Top</option>
+            <option value="right">Right</option>
+            <option value="bottom">Bottom</option>
+            <option value="left">Left</option>
+          </select>
+        </label>
+        <label>Position along that wall (inches from the wall's start)
+          <input type="number" id="ad-pos" min="0" step="1" value="0">
+        </label>
+        <label>Width (inches)<input type="number" id="ad-width" min="10" max="120" step="1" value="30"></label>
+        <div class="modal-actions">
+          <button type="button" class="btn btn-ghost" id="ad-cancel">Cancel</button>
+          <button type="submit" class="btn btn-primary">Add Door</button>
+        </div>
+      </form>
+    `, content => {
+      content.querySelector("#ad-cancel").addEventListener("click", closeModal);
+      content.querySelector("#add-door-form").addEventListener("submit", e => {
+        e.preventDefault();
+        const label = content.querySelector("#ad-label").value.trim() || "Door";
+        const wall = content.querySelector("#ad-wall").value;
+        const pos = parseFloat(content.querySelector("#ad-pos").value) || 0;
+        const width = parseFloat(content.querySelector("#ad-width").value) || 30;
+        state.room.doors.push({ id: uid("dr"), label, wall, pos, width });
+        save(); closeModal(); render();
+      });
+    });
   });
 
   document.getElementById("btn-add-furniture").addEventListener("click", () => {

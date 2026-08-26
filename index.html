@@ -47,22 +47,13 @@
           <label>Room length (inches, top‑bottom)
             <input type="number" id="room-length" min="12" max="900" step="1" required>
           </label>
-          <label>Which wall is the door on?
-            <select id="room-door-wall">
-              <option value="top">Top</option>
-              <option value="right">Right</option>
-              <option value="bottom">Bottom</option>
-              <option value="left" selected>Left</option>
-            </select>
-          </label>
-          <label>Door position along that wall (inches from the wall's start)
-            <input type="number" id="room-door-pos" min="0" step="1" value="0">
-          </label>
-          <label>Door width (inches)
-            <input type="number" id="room-door-width" min="10" max="72" step="1" value="32">
-          </label>
           <button type="submit" class="btn btn-primary">Save Room</button>
         </form>
+        <div class="doors-section">
+          <p class="muted" style="margin:10px 0 6px">Doors &amp; openings (entry door, closet door, etc.)</p>
+          <ul class="item-list" id="door-list"></ul>
+          <button type="button" id="btn-add-door" class="btn btn-small" style="margin-top:8px">+ Add Door</button>
+        </div>
       </div>
     </details>
 
