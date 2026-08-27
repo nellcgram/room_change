@@ -77,7 +77,7 @@ export default {
         },
         body: JSON.stringify({
           model: MODEL,
-          max_tokens: 1024,
+          max_tokens: 3000,
           system: SYSTEM_PROMPT,
           messages: [{ role: "user", content: roomDescription }],
         }),
