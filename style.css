@@ -263,10 +263,6 @@ button, select, input{ font-family: inherit; font-size: inherit; }
 .rotate-handle:active{ cursor: grabbing; }
 .rotate-stem{ stroke: var(--accent); stroke-width: 1.5; }
 
-.lane-rect{ fill: rgba(91,127,166,0.14); stroke: var(--blue-grid); stroke-width: 1.5; stroke-dasharray: 6 4; }
-.lane-rect.issue{ stroke: var(--danger); fill: rgba(199,49,31,0.12); }
-.lane-handle{ fill: var(--paper); stroke: var(--blue-grid); stroke-width: 1.5; cursor: nwse-resize; }
-
 .room-wall{ fill: none; stroke: var(--ink); stroke-width: 3; }
 .room-door{ stroke: var(--paper); stroke-width: 5; }
 .room-door-label{ font-family: var(--font-mono); font-size: 10px; fill: var(--ink-soft); }

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-<title>Room Change</title>
+<title>Change My Room</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -12,20 +12,19 @@
 <body>
 
 <header class="topbar">
-  <h1>Room Change</h1>
-  <p class="tagline">Plan the room to scale. Drag furniture into place, mark the path you need clear, and see what's still missing.</p>
+  <h1>Change My Room</h1>
+  <p class="tagline">Plan the room to scale. Drag furniture into place and assess what's missing.</p>
 </header>
 
 <main class="layout">
 
   <section class="sheet-panel">
     <div class="sheet-toolbar">
-      <button id="btn-add-furniture" class="btn btn-primary">+ Add Furniture</button>
-      <button id="btn-add-lane" class="btn">+ Mark a Clear Path</button>
+      <button id="btn-add-furniture" class="btn btn-primary">+ Add furniture</button>
       <div class="spacer"></div>
-      <button id="btn-ai-edit" class="btn btn-accent">Tell AI What to Change</button>
-      <button id="btn-analyze" class="btn btn-accent">Get AI Design Review</button>
-      <button id="btn-export" class="btn btn-ghost">Save Backup File</button>
+      <button id="btn-ai-edit" class="btn btn-accent">Tell Claude what to change</button>
+      <button id="btn-analyze" class="btn btn-accent">AI design review</button>
+      <button id="btn-export" class="btn btn-ghost">Save backup file</button>
       <label class="btn btn-ghost file-label">
         Load Backup File
         <input type="file" id="input-import" accept="application/json" hidden>

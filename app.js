@@ -31,8 +31,7 @@ function defaultState() {
       doors: [{ id: uid("dr"), label: "Door", wall: "left", pos: 0, width: 32 }]
     },
     items: [],
-    zones: [],
-    lanes: []
+    zones: []
   };
 }
 
@@ -54,8 +53,7 @@ function normalizeState(parsed) {
       doors
     },
     items: Array.isArray(parsed.items) ? parsed.items : [],
-    zones: Array.isArray(parsed.zones) ? parsed.zones : [],
-    lanes: Array.isArray(parsed.lanes) ? parsed.lanes : []
+    zones: Array.isArray(parsed.zones) ? parsed.zones : []
   };
 }
 
@@ -87,7 +85,7 @@ function uid(prefix) {
 }
 function spawnPosition(w, d) {
   const margin = 16;
-  const stagger = (state.items.length + state.lanes.length) * 18;
+  const stagger = state.items.length * 18;
   const cx = Math.min(state.room.width - w / 2 - margin, margin + w / 2 + stagger);
   const cy = Math.min(state.room.length - d / 2 - margin, margin + d / 2 + stagger);
   return { cx: Math.max(w / 2, cx), cy: Math.max(d / 2, cy) };
@@ -192,18 +190,6 @@ function computeIssues() {
     }
   }
 
-  for (const lane of state.lanes) {
-    for (const item of state.items) {
-      if (rectsOverlap(lane, item)) {
-        issues.push({
-          id: `lane-${lane.id}-${item.id}`, severity: "error",
-          message: `"${item.name}" is blocking a path you marked as clear.`,
-          relatedIds: [item.id, lane.id]
-        });
-      }
-    }
-  }
-
   for (const zone of state.zones) {
     const preset = ZONE_TYPES[zone.type] || ZONE_TYPES.custom;
     const required = zone.type === "custom" ? (zone.requiredTags || []) : preset.requiredTags;
@@ -247,21 +233,15 @@ function beginDrag(kind, id, extra) {
 function onPointerMove(e) {
   if (!drag) return;
   const p = clientToModel(e.clientX, e.clientY);
-  const isItem = drag.kind === "item-move" || drag.kind === "item-rotate";
-  const obj = isItem ? state.items.find(i => i.id === drag.id) : state.lanes.find(l => l.id === drag.id);
+  const obj = state.items.find(i => i.id === drag.id);
   if (!obj) { drag = null; return; }
 
-  if (drag.kind === "item-move" || drag.kind === "lane-move") {
+  if (drag.kind === "item-move") {
     obj.cx = drag.origCx + (p.x - drag.startModel.x);
     obj.cy = drag.origCy + (p.y - drag.startModel.y);
   } else if (drag.kind === "item-rotate") {
     const angle = Math.atan2(p.y - obj.cy, p.x - obj.cx) * (180 / Math.PI);
     obj.rotation = Math.round(angle + 90);
-  } else if (drag.kind === "lane-resize") {
-    const w = Math.max(10, p.x - drag.left);
-    const d = Math.max(10, p.y - drag.top);
-    obj.w = w; obj.d = d;
-    obj.cx = drag.left + w / 2; obj.cy = drag.top + d / 2;
   }
   render();
 }
@@ -308,7 +288,6 @@ function renderCanvas(errorIds) {
     root.appendChild(doorLabel);
   }
 
-  for (const lane of state.lanes) root.appendChild(renderLaneEl(lane, errorIds));
   for (const item of state.items) root.appendChild(renderPieceEl(item, errorIds));
 }
 
@@ -363,46 +342,6 @@ function renderPieceEl(item, errorIds) {
   rect.addEventListener("pointerdown", startMove);
   label.addEventListener("pointerdown", startMove);
   g.addEventListener("click", () => { selectedId = item.id; render(); });
-
-  return g;
-}
-
-function renderLaneEl(lane, errorIds) {
-  const pxCx = lane.cx * SCALE, pxCy = lane.cy * SCALE;
-  const pxW = lane.w * SCALE, pxD = lane.d * SCALE;
-  const hasError = errorIds.has(lane.id);
-
-  const g = svgEl("g", { class: "lane", transform: `translate(${pxCx},${pxCy})` });
-  const rect = svgEl("rect", {
-    x: -pxW / 2, y: -pxD / 2, width: pxW, height: pxD,
-    class: "lane-rect" + (hasError ? " issue" : "")
-  });
-  rect.addEventListener("pointerdown", e => {
-    e.stopPropagation(); e.preventDefault();
-    const p = clientToModel(e.clientX, e.clientY);
-    beginDrag("lane-move", lane.id, { startModel: p, origCx: lane.cx, origCy: lane.cy });
-  });
-  g.appendChild(rect);
-
-  const del = svgEl("text", {
-    x: -pxW / 2 + 4, y: -pxD / 2 + 14, class: "piece-label",
-    style: "cursor:pointer; fill:#C7311F;"
-  });
-  del.textContent = "✕ remove path";
-  del.addEventListener("pointerdown", e => e.stopPropagation());
-  del.addEventListener("click", e => {
-    e.stopPropagation();
-    state.lanes = state.lanes.filter(l => l.id !== lane.id);
-    save(); render();
-  });
-  g.appendChild(del);
-
-  const handle = svgEl("circle", { cx: pxW / 2, cy: pxD / 2, r: 6, class: "lane-handle" });
-  handle.addEventListener("pointerdown", e => {
-    e.stopPropagation(); e.preventDefault();
-    beginDrag("lane-resize", lane.id, { left: lane.cx - lane.w / 2, top: lane.cy - lane.d / 2 });
-  });
-  g.appendChild(handle);
 
   return g;
 }
@@ -619,10 +558,6 @@ function describeRoomForAI(issues) {
       );
     }
   }
-  if (state.lanes.length) {
-    lines.push("");
-    lines.push(`${state.lanes.length} "keep clear" path(s) marked.`);
-  }
   lines.push("");
   if (issues.length) {
     lines.push("Issues already detected mechanically (trust these, don't re-derive):");
@@ -681,7 +616,7 @@ async function runAnalysis() {
   const roomDescription = describeRoomForAI(computeIssues());
 
   openModal(`
-    <h2>AI Design Review</h2>
+    <h2>AI design review</h2>
     <div id="analyze-result"><p class="muted">Thinking it over...</p></div>
     <div class="modal-actions">
       <button type="button" class="btn btn-ghost" id="analyze-settings-btn">Change Worker URL</button>
@@ -778,7 +713,7 @@ function applyOperations(operations) {
 
 function openAiEditModal() {
   openModal(`
-    <h2>Tell AI What to Change</h2>
+    <h2>Tell Claude what to change</h2>
     <p class="muted" style="margin:0 0 10px">Describe what you want, in plain English - e.g. "remove the dresser and add a reading chair in the corner." The AI will edit your furniture directly.</p>
     <form class="stacked-form" id="ai-edit-form">
       <label>What do you want changed?
@@ -808,7 +743,7 @@ async function runAiEdit(instruction) {
   }
 
   openModal(`
-    <h2>Tell AI What to Change</h2>
+    <h2>Tell Claude what to change</h2>
     <div id="ai-edit-result"><p class="muted">Working on it...</p></div>
     <div class="modal-actions">
       <button type="button" class="btn btn-primary" id="ai-edit-close">Close</button>
@@ -974,14 +909,6 @@ function wireEvents() {
         save(); closeModal(); render();
       });
     });
-  });
-
-  document.getElementById("btn-add-lane").addEventListener("click", () => {
-    const w = Math.min(30, state.room.width * 0.4);
-    const d = Math.min(48, state.room.length * 0.4);
-    const pos = spawnPosition(w, d);
-    state.lanes.push({ id: uid("l"), cx: pos.cx, cy: pos.cy, w, d });
-    save(); render();
   });
 
   document.getElementById("btn-add-zone").addEventListener("click", () => {
