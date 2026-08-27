@@ -97,7 +97,9 @@ export default {
 
     const data = await anthropicResp.json();
     const textBlock = (data.content || []).find(b => b.type === "text");
-    const feedback = textBlock ? textBlock.text : "No feedback returned.";
+    const feedback = textBlock
+      ? textBlock.text
+      : `No feedback returned. stop_reason: ${data.stop_reason}, content: ${JSON.stringify(data.content).slice(0, 300)}`;
 
     await env.RATE_LIMIT_KV.put(countKey, String(count + 1), { expirationTtl: 60 * 60 * 26 });
 
