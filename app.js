@@ -715,6 +715,137 @@ async function runAnalysis() {
   }
 }
 
+/* ================= AI Room Editing ================= */
+function describeRoomForEdit() {
+  return {
+    width: state.room.width,
+    length: state.room.length,
+    items: state.items.map(i => ({
+      name: i.name, w: i.w, d: i.d, job: i.jobTag,
+      cx: round1(i.cx), cy: round1(i.cy), rotation: Math.round(i.rotation || 0)
+    }))
+  };
+}
+
+function findItemByMatch(match) {
+  if (!match) return null;
+  const needle = String(match).toLowerCase();
+  return state.items.find(i => i.name.toLowerCase().includes(needle)) || null;
+}
+
+function applyOperations(operations) {
+  let applied = 0, skipped = 0;
+  const validJobs = JOB_TAGS.map(t => t.key);
+
+  for (const op of operations || []) {
+    if (!op || typeof op.op !== "string") { skipped++; continue; }
+
+    if (op.op === "add") {
+      const w = Number(op.w), d = Number(op.d);
+      if (!op.name || !(w > 0) || !(d > 0)) { skipped++; continue; }
+      const job = validJobs.includes(op.job) ? op.job : "unassigned";
+      const pos = spawnPosition(w, d);
+      const cx = Number.isFinite(Number(op.cx)) ? Number(op.cx) : pos.cx;
+      const cy = Number.isFinite(Number(op.cy)) ? Number(op.cy) : pos.cy;
+      state.items.push({
+        id: uid("f"), name: String(op.name).slice(0, 60), w, d,
+        cx, cy, rotation: Number(op.rotation) || 0, jobTag: job, zoneId: null
+      });
+      applied++;
+    } else if (op.op === "remove") {
+      const item = findItemByMatch(op.match);
+      if (!item) { skipped++; continue; }
+      state.items = state.items.filter(i => i.id !== item.id);
+      applied++;
+    } else if (op.op === "update") {
+      const item = findItemByMatch(op.match);
+      if (!item) { skipped++; continue; }
+      if (op.name) item.name = String(op.name).slice(0, 60);
+      if (Number(op.w) > 0) item.w = Number(op.w);
+      if (Number(op.d) > 0) item.d = Number(op.d);
+      if (validJobs.includes(op.job)) item.jobTag = op.job;
+      if (Number.isFinite(Number(op.cx))) item.cx = Number(op.cx);
+      if (Number.isFinite(Number(op.cy))) item.cy = Number(op.cy);
+      if (Number.isFinite(Number(op.rotation))) item.rotation = Number(op.rotation);
+      applied++;
+    } else {
+      skipped++;
+    }
+  }
+
+  return { applied, skipped };
+}
+
+function openAiEditModal() {
+  openModal(`
+    <h2>Tell AI What to Change</h2>
+    <p class="muted" style="margin:0 0 10px">Describe what you want, in plain English - e.g. "remove the dresser and add a reading chair in the corner." The AI will edit your furniture directly.</p>
+    <form class="stacked-form" id="ai-edit-form">
+      <label>What do you want changed?
+        <textarea id="ai-edit-instruction" rows="3" required placeholder="e.g. Remove the dresser, add a reading chair near the window" style="font-family:var(--font-body); padding:7px 8px; border:1px solid var(--line); border-radius:var(--radius); resize:vertical;"></textarea>
+      </label>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="ai-edit-cancel">Cancel</button>
+        <button type="submit" class="btn btn-primary">Make the Change</button>
+      </div>
+    </form>
+  `, content => {
+    content.querySelector("#ai-edit-cancel").addEventListener("click", closeModal);
+    content.querySelector("#ai-edit-instruction").focus();
+    content.querySelector("#ai-edit-form").addEventListener("submit", e => {
+      e.preventDefault();
+      const instruction = content.querySelector("#ai-edit-instruction").value.trim();
+      if (instruction) runAiEdit(instruction);
+    });
+  });
+}
+
+async function runAiEdit(instruction) {
+  const endpoint = localStorage.getItem(ANALYZE_ENDPOINT_KEY);
+  if (!endpoint) {
+    openAnalyzeSettingsModal(() => runAiEdit(instruction));
+    return;
+  }
+
+  openModal(`
+    <h2>Tell AI What to Change</h2>
+    <div id="ai-edit-result"><p class="muted">Working on it...</p></div>
+    <div class="modal-actions">
+      <button type="button" class="btn btn-primary" id="ai-edit-close">Close</button>
+    </div>
+  `, content => {
+    content.querySelector("#ai-edit-close").addEventListener("click", closeModal);
+  });
+
+  try {
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction, room: describeRoomForEdit() }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    const resultEl = document.getElementById("ai-edit-result");
+    if (!resultEl) return; // modal was closed before the response came back
+    if (!resp.ok) {
+      resultEl.innerHTML = `<p class="muted">${escapeHtml(data.error || "Something went wrong talking to the AI service.")}</p>`;
+      return;
+    }
+    const { applied, skipped } = applyOperations(data.operations);
+    save();
+    selectedId = null;
+    render();
+    const parts = [];
+    if (data.summary) parts.push(escapeHtml(data.summary));
+    parts.push(`<span class="muted">${applied} change${applied === 1 ? "" : "s"} applied${skipped ? `, ${skipped} skipped` : ""}.</span>`);
+    resultEl.innerHTML = `<p>${parts.join("<br>")}</p>`;
+  } catch (err) {
+    const resultEl = document.getElementById("ai-edit-result");
+    if (resultEl) {
+      resultEl.innerHTML = '<p class="muted">Could not reach the AI service. Check your Worker URL and your internet connection.</p>';
+    }
+  }
+}
+
 /* ================= Wiring ================= */
 function populateRoomForm() {
   document.getElementById("room-width").value = state.room.width;
@@ -894,6 +1025,7 @@ function wireEvents() {
   });
 
   document.getElementById("btn-analyze").addEventListener("click", runAnalysis);
+  document.getElementById("btn-ai-edit").addEventListener("click", openAiEditModal);
 
   document.getElementById("btn-export").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
