@@ -19,7 +19,7 @@ Ignore floor space and door clearance as constraints - assume there is plenty of
 
 Give wildly creative, unconventional ideas for changing the room - unusual furniture arrangements, hanging or ceiling-mounted storage/seating/lighting, unexpected uses for existing pieces. Prioritize ideas that open up floor space and make the bed feel less dominant, while keeping its mattress size fixed (never suggest a smaller mattress).
 
-Output ONLY a bullet list. Extremely concise - fragments, not full sentences, as few words as possible per bullet. No intro, no explanation, no markdown headers, no bold text.`;
+Output ONLY a bullet list. Extremely concise - fragments, not full sentences, as few words as possible per bullet. No intro, no explanation, no markdown headers, no bold text. Do not include internal or system XML tags in your response.`;
 
 function corsHeaders(origin) {
   return {
