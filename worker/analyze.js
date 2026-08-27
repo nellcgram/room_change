@@ -87,7 +87,12 @@ export default {
     }
 
     if (!anthropicResp.ok) {
-      return jsonResponse({ error: "The AI service had a problem. Try again in a bit." }, 502, origin);
+      const errText = await anthropicResp.text().catch(() => "");
+      return jsonResponse(
+        { error: `The AI service returned an error (status ${anthropicResp.status}): ${errText.slice(0, 300)}` },
+        502,
+        origin
+      );
     }
 
     const data = await anthropicResp.json();
