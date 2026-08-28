@@ -781,6 +781,190 @@ async function runAiEdit(instruction) {
   }
 }
 
+/* ================= Critique & Fix Loop (multi-pass, human-in-the-loop) ================= */
+function parseBulletLines(text) {
+  return String(text || "")
+    .split("\n")
+    .map(l => l.trim())
+    .filter(l => /^[-•]\s+/.test(l))
+    .map(l => l.replace(/^[-•]\s+/, ""));
+}
+
+function describeOperations(ops) {
+  return (ops || []).map(op => {
+    if (op.op === "add") return `Add "${op.name}" (${op.w}×${op.d}in)`;
+    if (op.op === "remove") return `Remove "${op.match}"`;
+    if (op.op === "update") {
+      const changes = [];
+      if (op.cx !== undefined || op.cy !== undefined) changes.push("move it");
+      if (op.rotation !== undefined) changes.push("rotate it");
+      if (op.job) changes.push(`set its job to "${jobTag(op.job).label}"`);
+      if (op.w !== undefined || op.d !== undefined) changes.push("resize it");
+      if (op.name) changes.push(`rename it to "${op.name}"`);
+      return `Update "${op.match}"${changes.length ? " — " + changes.join(", ") : ""}`;
+    }
+    return "An unrecognized change";
+  });
+}
+
+function openCritiqueLoopModal() {
+  const endpoint = localStorage.getItem(ANALYZE_ENDPOINT_KEY);
+  if (!endpoint) {
+    openAnalyzeSettingsModal(openCritiqueLoopModal);
+    return;
+  }
+  openModal(`
+    <h2>Critique &amp; Fix Loop</h2>
+    <div id="loop-body"><p class="muted">Thinking it over...</p></div>
+  `, content => {
+    document.getElementById("modal-content").classList.add("modal-wide");
+  });
+  runCritiqueLoopStep(endpoint);
+}
+
+async function runCritiqueLoopStep(endpoint) {
+  const body = document.getElementById("loop-body");
+  if (body) body.innerHTML = '<p class="muted">Thinking it over...</p>';
+
+  let feedback;
+  try {
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ roomDescription: describeRoomForAI(computeIssues()) }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    const el = document.getElementById("loop-body");
+    if (!el) return; // modal closed
+    if (!resp.ok) {
+      el.innerHTML = `<p class="muted">${escapeHtml(data.error || "Something went wrong talking to the AI service.")}</p><div class="modal-actions"><button type="button" class="btn btn-primary" id="loop-close">Close</button></div>`;
+      document.getElementById("loop-close")?.addEventListener("click", closeModal);
+      return;
+    }
+    feedback = data.feedback || "";
+  } catch (err) {
+    const el = document.getElementById("loop-body");
+    if (el) {
+      el.innerHTML = '<p class="muted">Could not reach the AI service. Check your Worker URL and your internet connection.</p><div class="modal-actions"><button type="button" class="btn btn-primary" id="loop-close">Close</button></div>';
+      document.getElementById("loop-close")?.addEventListener("click", closeModal);
+    }
+    return;
+  }
+
+  const bullets = parseBulletLines(feedback);
+  const el = document.getElementById("loop-body");
+  if (!el) return;
+
+  if (!bullets.length) {
+    el.innerHTML = `<div>${formatFeedbackHtml(feedback || "No suggestions returned.")}</div><div class="modal-actions"><button type="button" class="btn btn-primary" id="loop-close">Close</button></div>`;
+    document.getElementById("loop-close")?.addEventListener("click", closeModal);
+    return;
+  }
+
+  el.innerHTML =
+    `<p class="muted" style="margin:0 0 8px">Pick a suggestion to apply. Nothing changes until you confirm it.</p>` +
+    `<ul class="item-list">` +
+    bullets.map((b, i) => `
+      <li class="item-row" style="align-items:flex-start; cursor:default;">
+        <span style="flex:1">${escapeHtml(b)}</span>
+        <button type="button" class="btn btn-small loop-apply-btn" data-idx="${i}">Apply this</button>
+      </li>
+    `).join("") +
+    `</ul>` +
+    `<div class="modal-actions"><button type="button" class="btn btn-ghost" id="loop-close">Done</button></div>`;
+
+  el.querySelectorAll(".loop-apply-btn").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const bulletText = bullets[Number(btn.dataset.idx)];
+      runProposeFixStep(endpoint, bulletText);
+    });
+  });
+  document.getElementById("loop-close")?.addEventListener("click", closeModal);
+}
+
+async function runProposeFixStep(endpoint, bulletText) {
+  const body = document.getElementById("loop-body");
+  if (!body) return;
+  body.innerHTML = '<p class="muted">Working out how to apply that...</p>';
+
+  let data;
+  try {
+    const resp = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: bulletText, room: describeRoomForEdit() }),
+    });
+    data = await resp.json().catch(() => ({}));
+    const el = document.getElementById("loop-body");
+    if (!el) return;
+    if (!resp.ok) {
+      el.innerHTML = `<p class="muted">${escapeHtml(data.error || "Something went wrong.")}</p><div class="modal-actions"><button type="button" class="btn btn-ghost" id="loop-back">Back to suggestions</button></div>`;
+      document.getElementById("loop-back")?.addEventListener("click", () => runCritiqueLoopStep(endpoint));
+      return;
+    }
+  } catch (err) {
+    const el = document.getElementById("loop-body");
+    if (el) {
+      el.innerHTML = '<p class="muted">Could not reach the AI service.</p><div class="modal-actions"><button type="button" class="btn btn-ghost" id="loop-back">Back to suggestions</button></div>';
+      document.getElementById("loop-back")?.addEventListener("click", () => runCritiqueLoopStep(endpoint));
+    }
+    return;
+  }
+
+  const ops = Array.isArray(data.operations) ? data.operations : [];
+  const el = document.getElementById("loop-body");
+  if (!el) return;
+
+  if (!ops.length) {
+    el.innerHTML = `<p class="muted">No concrete change came back for that suggestion. Try a different one.</p><div class="modal-actions"><button type="button" class="btn btn-ghost" id="loop-back">Back to suggestions</button></div>`;
+    document.getElementById("loop-back")?.addEventListener("click", () => runCritiqueLoopStep(endpoint));
+    return;
+  }
+
+  const descriptions = describeOperations(ops);
+  el.innerHTML =
+    `<p class="muted" style="margin:0 0 8px">This will:</p>` +
+    `<ul>${descriptions.map(d => `<li>${escapeHtml(d)}</li>`).join("")}</ul>` +
+    `<div class="modal-actions">` +
+    `<button type="button" class="btn btn-ghost" id="loop-cancel">Cancel</button>` +
+    `<button type="button" class="btn btn-primary" id="loop-confirm">Confirm &amp; Apply</button>` +
+    `</div>`;
+
+  document.getElementById("loop-cancel")?.addEventListener("click", () => runCritiqueLoopStep(endpoint));
+  document.getElementById("loop-confirm")?.addEventListener("click", () => confirmApplyFix(endpoint, ops));
+}
+
+function confirmApplyFix(endpoint, ops) {
+  const before = computeIssues().length;
+  applyOperations(ops);
+  save();
+  selectedId = null;
+  render();
+  const after = computeIssues().length;
+
+  const el = document.getElementById("loop-body");
+  if (!el) return;
+
+  let deltaMsg;
+  if (after > before) {
+    deltaMsg = `⚠ This introduced ${after - before} new issue${after - before === 1 ? "" : "s"} — check the Issues panel.`;
+  } else if (after < before) {
+    deltaMsg = `✓ Applied. Issues went from ${before} to ${after}.`;
+  } else {
+    deltaMsg = `✓ Applied. No new issues (still ${after}).`;
+  }
+
+  el.innerHTML =
+    `<p>${escapeHtml(deltaMsg)}</p>` +
+    `<div class="modal-actions">` +
+    `<button type="button" class="btn btn-ghost" id="loop-done">Done</button>` +
+    `<button type="button" class="btn btn-primary" id="loop-again">Get new suggestions</button>` +
+    `</div>`;
+
+  document.getElementById("loop-done")?.addEventListener("click", closeModal);
+  document.getElementById("loop-again")?.addEventListener("click", () => runCritiqueLoopStep(endpoint));
+}
+
 /* ================= Wiring ================= */
 function populateRoomForm() {
   document.getElementById("room-width").value = state.room.width;
@@ -953,6 +1137,7 @@ function wireEvents() {
 
   document.getElementById("btn-analyze").addEventListener("click", runAnalysis);
   document.getElementById("btn-ai-edit").addEventListener("click", openAiEditModal);
+  document.getElementById("btn-critique-loop").addEventListener("click", openCritiqueLoopModal);
 
   document.getElementById("btn-export").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
