@@ -21,9 +21,14 @@ Open `index.html` in a browser (or visit the deployed site — see below).
 - **Tell Claude what to change** — describe a change in plain English (e.g.
   "remove the dresser and add a reading chair by the window") and Claude edits
   your furniture directly.
+- **Critique & Fix Loop** — Claude critiques your room and lists its suggestions.
+  Pick one, review the exact changes it proposes, and confirm to apply them. The
+  app then reports how the issue count changed and automatically critiques the
+  updated layout, so you can keep going until you're happy. Nothing changes
+  without your confirmation.
 
-Both AI features need a one-time setup — see **AI Design Review setup** below.
-Until it's set up, clicking either button just asks you to paste in a Worker URL.
+All three AI features need a one-time setup — see **AI Design Review setup** below.
+Until it's set up, clicking any of those buttons just asks you to paste in a Worker URL.
 
 Everything saves automatically to your browser's local storage. Use **Save backup
 file** / **Load Backup File** to back up your layout to a file or move it to
@@ -71,5 +76,7 @@ Cloudflare's free tier, and only the app's owner needs to do it.
 
 The Worker in this repo restricts requests to `https://nellcgram.github.io`
 (edit `ALLOWED_ORIGIN` in `worker/analyze.js` if you fork this to your own site)
-and caps total analyses to 100/day across all visitors, so a stray or abused
-request can't run up a surprise bill.
+and caps total requests to 100/day across all visitors, so a stray or abused
+request can't run up a surprise bill. Each AI button press counts as a request,
+and each pass of the Critique & Fix Loop uses two or three (one critique, one
+proposed fix, then a fresh critique after you apply it).
