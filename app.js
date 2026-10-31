@@ -822,9 +822,10 @@ function openCritiqueLoopModal() {
   runCritiqueLoopStep(endpoint);
 }
 
-async function runCritiqueLoopStep(endpoint) {
+async function runCritiqueLoopStep(endpoint, notice = "") {
+  const noticeHtml = notice ? `<p>${escapeHtml(notice)}</p>` : "";
   const body = document.getElementById("loop-body");
-  if (body) body.innerHTML = '<p class="muted">Thinking it over...</p>';
+  if (body) body.innerHTML = noticeHtml + '<p class="muted">Thinking it over...</p>';
 
   let feedback;
   try {
@@ -837,7 +838,7 @@ async function runCritiqueLoopStep(endpoint) {
     const el = document.getElementById("loop-body");
     if (!el) return; // modal closed
     if (!resp.ok) {
-      el.innerHTML = `<p class="muted">${escapeHtml(data.error || "Something went wrong talking to the AI service.")}</p><div class="modal-actions"><button type="button" class="btn btn-primary" id="loop-close">Close</button></div>`;
+      el.innerHTML = `${noticeHtml}<p class="muted">${escapeHtml(data.error || "Something went wrong talking to the AI service.")}</p><div class="modal-actions"><button type="button" class="btn btn-primary" id="loop-close">Close</button></div>`;
       document.getElementById("loop-close")?.addEventListener("click", closeModal);
       return;
     }
@@ -845,7 +846,7 @@ async function runCritiqueLoopStep(endpoint) {
   } catch (err) {
     const el = document.getElementById("loop-body");
     if (el) {
-      el.innerHTML = '<p class="muted">Could not reach the AI service. Check your Worker URL and your internet connection.</p><div class="modal-actions"><button type="button" class="btn btn-primary" id="loop-close">Close</button></div>';
+      el.innerHTML = noticeHtml + '<p class="muted">Could not reach the AI service. Check your Worker URL and your internet connection.</p><div class="modal-actions"><button type="button" class="btn btn-primary" id="loop-close">Close</button></div>';
       document.getElementById("loop-close")?.addEventListener("click", closeModal);
     }
     return;
@@ -856,12 +857,13 @@ async function runCritiqueLoopStep(endpoint) {
   if (!el) return;
 
   if (!bullets.length) {
-    el.innerHTML = `<div>${formatFeedbackHtml(feedback || "No suggestions returned.")}</div><div class="modal-actions"><button type="button" class="btn btn-primary" id="loop-close">Close</button></div>`;
+    el.innerHTML = `${noticeHtml}<div>${formatFeedbackHtml(feedback || "No suggestions returned.")}</div><div class="modal-actions"><button type="button" class="btn btn-primary" id="loop-close">Close</button></div>`;
     document.getElementById("loop-close")?.addEventListener("click", closeModal);
     return;
   }
 
   el.innerHTML =
+    noticeHtml +
     `<p class="muted" style="margin:0 0 8px">Pick a suggestion to apply. Nothing changes until you confirm it.</p>` +
     `<ul class="item-list">` +
     bullets.map((b, i) => `
@@ -942,8 +944,7 @@ function confirmApplyFix(endpoint, ops) {
   render();
   const after = computeIssues().length;
 
-  const el = document.getElementById("loop-body");
-  if (!el) return;
+  if (!document.getElementById("loop-body")) return;
 
   let deltaMsg;
   if (after > before) {
@@ -954,15 +955,8 @@ function confirmApplyFix(endpoint, ops) {
     deltaMsg = `✓ Applied. No new issues (still ${after}).`;
   }
 
-  el.innerHTML =
-    `<p>${escapeHtml(deltaMsg)}</p>` +
-    `<div class="modal-actions">` +
-    `<button type="button" class="btn btn-ghost" id="loop-done">Done</button>` +
-    `<button type="button" class="btn btn-primary" id="loop-again">Get new suggestions</button>` +
-    `</div>`;
-
-  document.getElementById("loop-done")?.addEventListener("click", closeModal);
-  document.getElementById("loop-again")?.addEventListener("click", () => runCritiqueLoopStep(endpoint));
+  // Re-critique the updated layout automatically so the loop keeps going.
+  runCritiqueLoopStep(endpoint, deltaMsg);
 }
 
 /* ================= Wiring ================= */
